@@ -10,6 +10,13 @@
     "USE_TEXTURE": true
   },
   "_props": {
+    "UVoffset": {
+      "__type__": "cc.Vec4",
+      "x": 0.1,
+      "y": 0.1,
+      "z": 0.1,
+      "w": 0.1
+    },
     "lightColor": {
       "__type__": "cc.Color",
       "r": 255,

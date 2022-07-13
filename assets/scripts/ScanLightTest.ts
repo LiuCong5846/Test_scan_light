@@ -2,7 +2,9 @@
 const {ccclass, property} = cc._decorator;
 
 enum EMaterialPropertyName {
+    UV_OFFSET = "UVoffset",
     LIGHT_CENTER_POINT = "lightCenterPoint",
+    UV_RPTATED = "UVrotated",
     LIGHT_COLOR = "lightColor",
     LIGHT_ANGLE = "lightAngle",
     LIGHT_WIDTH = "lightWidth",
@@ -83,16 +85,16 @@ export default class ScanLightTest extends cc.Component {
         tooltip: "光束宽度, 范围0-1",
     })
     get lightWidth() {
-        return this._lightWidth;
+        return this._lightWidthParam;
     }
     set lightWidth(widthVal: number) {
-        this._lightWidth = widthVal;
+        this._lightWidthParam = widthVal;
         if (CC_EDITOR) {
             this.onPropertyChanged(EMaterialPropertyName.LIGHT_WIDTH);
         }
     }
     @property
-    private _lightWidth: number = 0.2;
+    private _lightWidthParam: number = 0.2;
 
     @property({
         type: cc.Boolean,
@@ -205,46 +207,39 @@ export default class ScanLightTest extends cc.Component {
     @property
     private _marginTime: number = 0.0;
  
-    private _lightCenterPoint: cc.Vec2 = cc.Vec2.ZERO;
-
-    private _lightTimeHelper: number = 0;
-
-    private _wOffsetLength: number = 0;
-    private _hOffsetLength: number = 0;
-    private _lightOriginalPoint: cc.Vec2 = cc.Vec2.ZERO;
+    private _lightOriginalPoints: cc.Vec2[] = null; // 0-左&上 1-右&下
+    private _lightCenterPoint: cc.Vec2 = null;
+    private _lightPointTimeHelper: number[] = []; // 0-开始时间 1-结束时间
+    private _lightScanStep: number = 0;
 
     protected onLoad(): void {
-        cc.dynamicAtlasManager.enabled = false;
-
-        const needFrameRates = (this._scanTime * cc.game.getFrameRate());
-        if (this._lightAngle === 0) {
-            this._wOffsetLength = 0;
-            this._hOffsetLength = 1 / needFrameRates;
-        } else if (this._lightAngle === 90) {
-            this._wOffsetLength = 1 / needFrameRates;
-            this._hOffsetLength = 0;
-        } else {
-            const unit = Math.sqrt(2) / needFrameRates;
-            const angleInRadians = this._lightAngle * (180 / Math.PI);
-            this._wOffsetLength = Math.abs(Math.cos(angleInRadians) * unit);
-            this._hOffsetLength = Math.abs(Math.sin(angleInRadians) * unit);
-        }
-
-        if (this._lightAngle === 0) {
-            this._lightOriginalPoint = this.isOppositeDir ? cc.v2(0.5, 1) : cc.v2(0.5, 0);
-        } else if (this.lightAngle === 90) {
-            this._lightOriginalPoint = this.isOppositeDir ? cc.v2(1, 0.5) : cc.v2(0, 0.5);
-        } else {
-            if (this._isAngleFlip) {
-                this._lightOriginalPoint = this.isOppositeDir ? cc.v2(1, 0) : cc.v2(0, 1);
-            } else {
-                this._lightOriginalPoint = this.isOppositeDir ? cc.v2(1, 1) : cc.v2(0, 0);
-            }
-        }
+        this._lightOriginalPoints = [];
+        this._lightPointTimeHelper = [0, 0];
+        this._lightScanStep = 0;
     }
 
     protected onEnable(): void {
-        this.resetLightCenterPoint();
+        const side = this._lightWidthParam / 2;
+        if (this._lightAngle === 0) {
+            this._lightOriginalPoints[0] = cc.v2(0.5, - side);
+            this._lightOriginalPoints[1] = cc.v2(0.5, 1 + side);
+        } else if (this._lightAngle === 90) {
+            this._lightOriginalPoints[0] = cc.v2(- side, 0.5);
+            this._lightOriginalPoints[1] = cc.v2(1 + side, 0.5);
+        } else {
+            if (this._isAngleFlip) {
+                this._lightOriginalPoints[0] = cc.v2(- side, 1 + side);
+                this._lightOriginalPoints[1] = cc.v2(1 + side, - side);
+            } else {
+                this._lightOriginalPoints[0] = cc.v2(- side, - side);
+                this._lightOriginalPoints[1] = cc.v2(1 + side, 1 + side);
+            }
+        }
+        this._lightCenterPoint = this._lightOriginalPoints[this.isOppositeDir ? 1 : 0];
+
+        this._lightScanStep = (1 + 2 * side) / (cc.game.getFrameRate() * this._scanTime);
+
+        this.resetUVInfo();
         this.onPropertyChanged(EMaterialPropertyName.LIGHT_CENTER_POINT);
         this.onPropertyChanged(EMaterialPropertyName.LIGHT_COLOR);
         this.onPropertyChanged(EMaterialPropertyName.LIGHT_ANGLE);
@@ -255,24 +250,21 @@ export default class ScanLightTest extends cc.Component {
         this.onPropertyChanged(EMaterialPropertyName.ENABLE_MIX_COLOR);
 
         this.unschedule(this.onLightCenterPointChanged);
-        this.schedule(this.onLightCenterPointChanged, 1 / cc.game.getFrameRate(), cc.macro.REPEAT_FOREVER, 0);
+        this.schedule(this.onLightCenterPointChanged, 0, cc.macro.REPEAT_FOREVER, 0);
     }
 
     protected onDisable(): void {
         this.unschedule(this.onLightCenterPointChanged);
     }
 
-    private resetLightCenterPoint() {
-        this._lightCenterPoint = this._lightOriginalPoint;
-        this._lightTimeHelper = Date.now();
-    }
-
-
-
     private setSpriteFrameRes() {
         if (this._spriteFrameRes) {
             this.rootNode.getComponent(cc.Sprite) && (this.rootNode.getComponent(cc.Sprite).spriteFrame = this._spriteFrameRes);
             this.lightNode.getComponent(cc.Sprite) && (this.lightNode.getComponent(cc.Sprite).spriteFrame = this._spriteFrameRes);
+
+            if (!CC_EDITOR) {
+                this.resetUVInfo();
+            }
         }
     }
 
@@ -292,37 +284,44 @@ export default class ScanLightTest extends cc.Component {
     }
 
     private onLightCenterPointChanged() {
-        // if (this._lightCenterPoint.sub(this._lightOriginalPoint).mag() >= Math.sqrt(2)) {
-        //     this.resetLightCenterPoint();
-        //     return;
-        // } // 算法有问题
         const currentTime = Date.now();
-        const time1 = this._lightTimeHelper + (this._scanTime + this.marginTime) * 1000;
-        if (time1 < currentTime) { // 这样也有问题
-            this.resetLightCenterPoint();
+
+        if (this._lightPointTimeHelper[1] <= currentTime) { // 这样也有问题
+            this._lightPointTimeHelper[0] = currentTime + this.marginTime * 1000;
+            this._lightPointTimeHelper[1] = currentTime + (this.marginTime + this._scanTime) * 1000;
+            this._lightCenterPoint = this.isOppositeDir ? this._lightOriginalPoints[1] : this._lightOriginalPoints[0];
             return;
         }
-        
-        if (this._lightAngle === 0 || this._lightAngle === 90) {
-            this._lightCenterPoint = this._lightCenterPoint.add(cc.v2(
-                this.isOppositeDir ? - this._wOffsetLength : this._wOffsetLength,
-                this.isOppositeDir ? - this._hOffsetLength : this._hOffsetLength,
-            ));
-        } else {
-            if (this._isAngleFlip) {
-                this._lightCenterPoint = this._lightCenterPoint.add(cc.v2(
-                    this.isOppositeDir ? - this._wOffsetLength : this._wOffsetLength,
-                    this.isOppositeDir ? this._hOffsetLength : - this._hOffsetLength,
-                ));
-            } else {
-                this._lightCenterPoint = this._lightCenterPoint.add(cc.v2(
-                    this.isOppositeDir ? - this._wOffsetLength : this._wOffsetLength,
-                    this.isOppositeDir ? - this._hOffsetLength : this._hOffsetLength,
-                ));
-            }
+
+        if (currentTime < this._lightPointTimeHelper[0]) {
+            return;
         }
+
+        if (this._isAngleFlip) {
+            this._lightCenterPoint = this._lightCenterPoint.add(cc.v2(
+                (this.isOppositeDir ? - 1 : 1) * this._lightScanStep,
+                (this.isOppositeDir ? 1 : - 1) * this._lightScanStep));
+        } else {
+            this._lightCenterPoint = this._lightCenterPoint.add(cc.v2(
+                (this.isOppositeDir ? - 1 : 1) * this._lightScanStep,
+                (this.isOppositeDir ? - 1 : 1) * this._lightScanStep));
+        }
+
+        
+
         this.onPropertyChanged(EMaterialPropertyName.LIGHT_CENTER_POINT);
-        console.log(this._lightCenterPoint);
+        // console.log(this._lightCenterPoint);
+    }
+
+    private resetUVInfo() {
+        const material = this.getMaterial();
+        material.setProperty(EMaterialPropertyName.UV_OFFSET as string, new cc.Vec4(
+            this._spriteFrameRes.uv[0],
+            this._spriteFrameRes.uv[5],
+            this._spriteFrameRes.uv[6],
+            this._spriteFrameRes.uv[3],
+        ));
+        material.setProperty(EMaterialPropertyName.UV_RPTATED, this._spriteFrameRes.isRotated() ? 1.0 : 0.0);
     }
 
     private onPropertyChanged(propertyName: EMaterialPropertyName) {
@@ -332,6 +331,10 @@ export default class ScanLightTest extends cc.Component {
         }
         let propertyVal: any = null;
         switch (propertyName) {
+            case EMaterialPropertyName.UV_OFFSET:
+            case EMaterialPropertyName.UV_RPTATED:
+                this.resetUVInfo();
+                break;
             case EMaterialPropertyName.LIGHT_CENTER_POINT:
                 propertyVal = this._lightCenterPoint;
                 break;
@@ -342,7 +345,7 @@ export default class ScanLightTest extends cc.Component {
                 propertyVal = this._isAngleFlip ? 180 -  this._lightAngle : this._lightAngle;
                 break;
             case EMaterialPropertyName.LIGHT_WIDTH:
-                propertyVal = this._lightWidth;
+                propertyVal = this._lightWidthParam;
                 break;
             case EMaterialPropertyName.ENABLE_GRADIENT:
                 propertyVal = this._enableGradient ? 1.0 : 0.0;

@@ -13,10 +13,14 @@ CCEffect %{
       properties:
         texture: { value: white }
         alphaThreshold: { value: 0.5 }
+        # UV坐标偏移量
+        UVoffset: { value: [1, 1, 1, 1] }
         # 光束颜色
         lightColor: { value: [1.0, 1.0, 1.0, 1.0], inspector: { type: color } }
         # 光束中心点坐标
         lightCenterPoint: { value: [0.2, 0.2] }
+        # UV偏移角度
+        UVrotated: { value: 0.0}
         # 光束倾斜角度
         lightAngle: { value: 36.0 }
         # 光束宽度
@@ -80,10 +84,14 @@ CCProgram fs %{
   #endif
 
   uniform LightArgs {
+    // uv坐标偏移量
+    vec4 UVoffset;
     // 光束颜色
     vec4 lightColor;
     // 光束中心点坐标
     vec2 lightCenterPoint;
+    // uv偏移角度
+    float UVrotated;
     // 光束倾斜角度
     float lightAngle;
     // 光束宽度
@@ -167,6 +175,16 @@ CCProgram fs %{
 
     ALPHA_TEST(o);
 
-    gl_FragColor = addLight(o, lightColor, lightCenterPoint, v_uv0, lightAngle, lightWidth);
+    vec2 uv;
+    uv.x = (v_uv0.x - UVoffset.x) / (UVoffset.z - UVoffset.x);
+    uv.y = (v_uv0.y - UVoffset.y) / (UVoffset.w - UVoffset.y);
+
+    if (UVrotated > 0.5) {
+      float tmp = uv.x;
+      uv.x = uv.y;
+      uv.y = 1.0 - tmp;
+    }
+
+    gl_FragColor = addLight(o, lightColor, lightCenterPoint, uv, lightAngle, lightWidth);
   }
 }%

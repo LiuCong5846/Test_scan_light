@@ -1,0 +1,24 @@
+{
+  "__type__": "cc.Material",
+  "_name": "",
+  "_objFlags": 0,
+  "_native": "",
+  "_effectAsset": {
+    "__uuid__": "c14e5da0-617d-4a8f-bb1b-80bfb9debc79"
+  },
+  "_defines": {
+    "USE_TEXTURE": true
+  },
+  "_props": {
+    "flowColor": {
+      "__type__": "cc.Color",
+      "r": 0,
+      "g": 10,
+      "b": 247,
+      "a": 255
+    },
+    "flowSpeed": 2,
+    "flowWidth": 0.2,
+    "flowCycle": 2
+  }
+}
